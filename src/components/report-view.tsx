@@ -1,6 +1,6 @@
 'use client';
 
-import type { FinalReport } from '@/lib/types';
+import type { FinalReport, IvyMessage } from '@/lib/types';
 import {
   BookOpen,
   Sparkles,
@@ -11,6 +11,7 @@ import {
   Globe,
   Download,
   RotateCcw,
+  FileText,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/card';
 import { Button } from './ui/button';
@@ -19,11 +20,28 @@ import { Separator } from './ui/separator';
 interface ReportViewProps {
   report: FinalReport;
   onRestart: () => void;
+  messages: IvyMessage[];
 }
 
-export function ReportView({ report, onRestart }: ReportViewProps) {
+export function ReportView({ report, onRestart, messages }: ReportViewProps) {
   const handleDownloadPdf = () => {
     window.print();
+  };
+
+  const handleDownloadTranscript = () => {
+    const transcript = messages
+        .map(m => `${m.role === 'user' ? 'Me' : 'Ivy'}: ${m.content}`)
+        .join('\n\n');
+    
+    const blob = new Blob([transcript], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `ivy-conversation-transcript.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -34,11 +52,15 @@ export function ReportView({ report, onRestart }: ReportViewProps) {
           <p className="text-muted-foreground">A summary of your conversation with Ivy.</p>
         </div>
         <div className="flex gap-2">
+           <Button onClick={handleDownloadTranscript} variant="outline">
+            <FileText className="mr-2 h-4 w-4" />
+            Transcript
+          </Button>
           <Button onClick={handleDownloadPdf} variant="outline">
             <Download className="mr-2 h-4 w-4" />
-            Download PDF
+            PDF Report
           </Button>
-          <Button onClick={onRestart} variant="secondary">
+          <Button onClick={onRestart}>
             <RotateCcw className="mr-2 h-4 w-4" />
             Start Over
           </Button>

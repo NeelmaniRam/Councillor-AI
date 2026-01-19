@@ -5,7 +5,6 @@ import {
   aiDrivenConversation,
   AIDrivenConversationInput,
 } from '@/ai/flows/ai-driven-conversation';
-import { extractInsights } from '@/ai/flows/real-time-insight-extraction';
 import { textToSpeech } from '@/ai/flows/text-to-speech';
 import type {
   StudentProfile,
@@ -24,6 +23,8 @@ import { ChatView } from '@/components/chat-view';
 import { ReportView } from '@/components/report-view';
 
 type AppState = 'welcome' | 'context' | 'chat' | 'report';
+
+const TYPING_SPEED = 40; // ms per character
 
 export function IvyVoiceGuide() {
   const [appState, setAppState] = useState<AppState>('welcome');
@@ -48,9 +49,11 @@ export function IvyVoiceGuide() {
 
   const audioRef = useRef<HTMLAudioElement>(null);
   const recognitionRef = useRef<any>(null);
+  const typingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const { toast } = useToast();
 
   useEffect(() => {
+    // Speech recognition setup
     if (typeof window !== 'undefined') {
       const SpeechRecognition =
         window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -72,6 +75,23 @@ export function IvyVoiceGuide() {
       }
     }
   }, [toast]);
+  
+  const stopTypingEffect = useCallback((fullText?: string) => {
+    if (typingIntervalRef.current) {
+      clearInterval(typingIntervalRef.current);
+      typingIntervalRef.current = null;
+    }
+    // Ensure the last message is fully displayed without the cursor
+    setMessages(prev => {
+        const lastMessage = prev[prev.length - 1];
+        if (lastMessage && lastMessage.role === 'assistant') {
+            const finalMsgs = [...prev];
+            finalMsgs[finalMsgs.length - 1].content = fullText || lastMessage.content.replace(/▒/g, '');
+            return finalMsgs;
+        }
+        return prev;
+    });
+  }, []);
 
   const handlePlayAudio = useCallback(async (text: string) => {
     try {
@@ -89,10 +109,33 @@ export function IvyVoiceGuide() {
         description: 'There was an error generating the voice response.',
         variant: 'destructive',
       });
-      // Fallback to text-only
+      stopTypingEffect(text); // Show full text if audio fails
       startTransition(() => {});
     }
-  }, [toast]);
+  }, [toast, stopTypingEffect]);
+  
+  const startTypingEffect = useCallback((text: string) => {
+    stopTypingEffect();
+    setMessages(prev => [...prev, { role: 'assistant', content: '▒' }]);
+
+    let charIndex = 0;
+    typingIntervalRef.current = setInterval(() => {
+      if (charIndex < text.length) {
+        setMessages(prev => {
+          const newMessages = [...prev];
+          const lastMessage = newMessages[newMessages.length - 1];
+          if (lastMessage) {
+            lastMessage.content = text.substring(0, charIndex + 1) + '▒';
+          }
+          return newMessages;
+        });
+        charIndex++;
+      } else {
+        stopTypingEffect(text);
+      }
+    }, TYPING_SPEED);
+
+  }, [stopTypingEffect]);
 
   const handleListen = useCallback(() => {
     if (!hasBrowserSupport || isThinking) return;
@@ -155,11 +198,17 @@ export function IvyVoiceGuide() {
         const input: AIDrivenConversationInput = {
           ...studentProfile,
           conversationHistory: [],
+          insights,
         };
         const result = await aiDrivenConversation(input);
+        startTransition(() => {}); // Set isThinking to false before starting audio/typing
+        
+        if (result.updatedInsights) {
+            setInsights(result.updatedInsights as Insights);
+        }
         if (result.nextPrompt) {
-          setMessages([{ role: 'assistant', content: result.nextPrompt }]);
-          await handlePlayAudio(result.nextPrompt);
+           handlePlayAudio(result.nextPrompt);
+           startTypingEffect(result.nextPrompt);
         }
       } catch (error) {
         console.error(error);
@@ -171,11 +220,12 @@ export function IvyVoiceGuide() {
         setAppState('context');
       }
     });
-  }, [studentProfile, toast, handlePlayAudio]);
+  }, [studentProfile, insights, toast, handlePlayAudio, startTypingEffect]);
 
   const handleSendMessage = useCallback(
     async (userInput: string) => {
-      if (!userInput.trim()) return;
+      if (!userInput.trim() || isThinking) return;
+      stopTypingEffect();
 
       const newMessages: IvyMessage[] = [
         ...messages,
@@ -185,45 +235,44 @@ export function IvyVoiceGuide() {
 
       startTransition(async () => {
         try {
-          const insightResult = await extractInsights({
-            studentResponse: userInput,
-            existingInsights: JSON.stringify(insights),
-          });
-
-          const updatedInsights: Insights = {
-            interests: [...new Set([...insights.interests, ...insightResult.interests.split(',').map(s => s.trim()).filter(Boolean)])],
-            strengths: [...new Set([...insights.strengths, ...insightResult.strengths.split(',').map(s => s.trim()).filter(Boolean)])],
-            constraints: [...new Set([...insights.constraints, ...insightResult.constraints.split(',').map(s => s.trim()).filter(Boolean)])],
-            careerClusters: [...new Set([...insights.careerClusters, ...insightResult.careerClusters.split(',').map(s => s.trim()).filter(Boolean)])],
-          };
-          setInsights(updatedInsights);
-
           const convResult = await aiDrivenConversation({
             ...studentProfile,
             conversationHistory: newMessages.map((m) => ({
-              role: m.role === 'user' ? 'user' : 'assistant',
+              role: m.role,
               content: m.content,
             })),
-            insights: updatedInsights,
+            insights,
           });
+          
+          startTransition(() => {}); // Set isThinking to false
 
-          if (convResult.nextPrompt) {
-            setMessages((prev) => [
-              ...prev,
-              { role: 'assistant', content: convResult.nextPrompt },
-            ]);
-            await handlePlayAudio(convResult.nextPrompt);
+          if (convResult.updatedInsights) {
+             const updated = convResult.updatedInsights;
+             setInsights({
+                interests: [...new Set([...(insights.interests || []), ...(updated.interests || [])])],
+                strengths: [...new Set([...(insights.strengths || []), ...(updated.strengths || [])])],
+                constraints: [...new Set([...(insights.constraints || []), ...(updated.constraints || [])])],
+                careerClusters: [...new Set([...(insights.careerClusters || []), ...(updated.careerClusters || [])])],
+             });
           }
 
           if (convResult.careerPaths && convResult.careerPaths.length > 0) {
+            stopTypingEffect(convResult.nextPrompt);
             setFinalReport({
               studentProfile,
-              ...updatedInsights,
+              ...insights,
               recommendedPaths: convResult.careerPaths.map((p) => ({ name: p })),
-              reasoning: convResult.nextPrompt,
+              reasoning: convResult.nextPrompt || 'Based on your conversation.',
             });
             setAppState('report');
+            return;
           }
+
+          if (convResult.nextPrompt) {
+            handlePlayAudio(convResult.nextPrompt);
+            startTypingEffect(convResult.nextPrompt);
+          }
+
         } catch (error) {
           console.error(error);
           toast({
@@ -231,11 +280,11 @@ export function IvyVoiceGuide() {
             description: 'The AI assistant ran into a problem. Please try again.',
             variant: 'destructive',
           });
-          setMessages(messages);
+          setMessages(messages); // Revert to previous messages on error
         }
       });
     },
-    [messages, insights, studentProfile, toast, handlePlayAudio]
+    [messages, insights, studentProfile, toast, handlePlayAudio, startTypingEffect, isThinking, stopTypingEffect]
   );
   
   const handleRestart = () => {
@@ -247,12 +296,12 @@ export function IvyVoiceGuide() {
   };
   
   const onAudioEnded = () => {
-    startTransition(() => {}); // This will set isThinking to false
+    stopTypingEffect();
     handleListen();
   };
-
+  
   const renderContent = () => {
-    switch (appState) {
+     switch (appState) {
       case 'welcome':
         return (
           <div className="flex flex-col items-center justify-center h-full text-center">
@@ -358,7 +407,7 @@ export function IvyVoiceGuide() {
         );
       case 'report':
         return finalReport ? (
-          <ReportView report={finalReport} onRestart={handleRestart} />
+          <ReportView report={finalReport} onRestart={handleRestart} messages={messages} />
         ) : null;
     }
   };

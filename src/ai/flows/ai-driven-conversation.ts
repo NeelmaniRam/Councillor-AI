@@ -11,6 +11,13 @@
 import {ai} from '@/ai/genkit';
 import {z} from 'genkit';
 
+const insightsSchema = z.object({
+  interests: z.array(z.string()).optional(),
+  strengths: z.array(z.string()).optional(),
+  constraints: z.array(z.string()).optional(),
+  careerClusters: z.array(z.string()).optional(),
+});
+
 const AIDrivenConversationInputSchema = z.object({
   name: z.string().describe('The name of the student.'),
   grade: z.string().describe('The grade/age range of the student.'),
@@ -20,22 +27,14 @@ const AIDrivenConversationInputSchema = z.object({
     role: z.enum(['user', 'assistant']),
     content: z.string(),
   })).optional().describe('The history of the conversation so far.'),
-  insights: z.object({
-    interests: z.array(z.string()).optional(),
-    strengths: z.array(z.string()).optional(),
-    constraints: z.array(z.string()).optional(),
-  }).optional().describe('Extracted insights from the conversation.'),
+  insights: insightsSchema.optional().describe('Extracted insights from the conversation.'),
   careerHypotheses: z.array(z.string()).optional().describe('Career clusters to be tested.')
 });
 export type AIDrivenConversationInput = z.infer<typeof AIDrivenConversationInputSchema>;
 
 const AIDrivenConversationOutputSchema = z.object({
   nextPrompt: z.string().describe('The next prompt to be presented to the student.'),
-  updatedInsights: z.object({
-    interests: z.array(z.string()).optional(),
-    strengths: z.array(z.string()).optional(),
-    constraints: z.array(z.string()).optional(),
-  }).optional().describe('Updated insights from the conversation.'),
+  updatedInsights: insightsSchema.describe('Updated insights from the conversation, reflecting the latest user response.'),
   careerPaths: z.array(z.string()).optional().describe('Recommended career paths based on the conversation.')
 });
 export type AIDrivenConversationOutput = z.infer<typeof AIDrivenConversationOutputSchema>;
@@ -46,9 +45,13 @@ export async function aiDrivenConversation(input: AIDrivenConversationInput): Pr
 
 const systemPromptContent = `You are Ivy, a personal career discovery guide. You are talking to a student. Your goal is to understand what excites them, how they think, and what kind of future might suit them best. You will ask reflective, adaptive questions and maintain emotional safety.
 
-Capture the student's interests, strengths, and constraints as the conversation progresses. Propose 3-5 career clusters for hypothesis testing once you have enough information about the student.
+As the conversation progresses, you MUST actively listen and extract the student's interests, strengths, constraints, and potential career clusters from their responses.
 
-Avoid deterministic claims and ranking careers as \"better\". Mitigate biases.
+Your response MUST be a valid JSON object with two fields:
+1.  "nextPrompt": A short, engaging, open-ended question to continue the conversation. This should feel like a natural continuation of the dialogue.
+2.  "updatedInsights": A JSON object containing updated lists for "interests", "strengths", "constraints", and "careerClusters". You must merge new insights from the latest student response with the existing insights, ensuring there are no duplicates.
+
+Avoid deterministic claims and ranking careers as "better". Mitigate biases.
 
 Basic Context:
 Name: {{{name}}}
@@ -56,27 +59,13 @@ Grade: {{{grade}}}
 Curriculum: {{{curriculum}}}
 Country: {{{country}}}
 
-Conversation History:
+Conversation History (latest is last):
 {{{formattedConversationHistory}}}
 
-Extracted Insights:
-Interests: {{insights.interests}}
-Strengths: {{insights.strengths}}
-Constraints: {{insights.constraints}}
+Current Extracted Insights (merge new findings into these):
+{{{json insights}}}
+`;
 
-Career Hypotheses: {{careerHypotheses}}
-
-Based on the conversation so far, generate the next prompt to continue the conversation. Consider the following phases:
-
-Phase 1: Welcome & Orientation (Trust Building)
-Phase 2: Basic Context Collection
-Phase 3: Interests & Motivations (Exploration)
-Phase 4: Strengths & Personality Signals
-Phase 5: Constraints & Preferences
-Phase 6: Career Cluster Hypothesis Testing
-Phase 7: Convergence
-
-Output only the next prompt.`;
 
 const PromptInputSchema = AIDrivenConversationInputSchema.extend({
   formattedConversationHistory: z.string().optional(),
@@ -87,6 +76,14 @@ const aiDrivenConversationPrompt = ai.definePrompt({
   input: {schema: PromptInputSchema},
   output: {schema: AIDrivenConversationOutputSchema},
   prompt: systemPromptContent,
+  config: {
+    safetySettings: [
+        {
+            category: 'HARM_CATEGORY_HARASSMENT',
+            threshold: 'BLOCK_ONLY_HIGH',
+        },
+    ],
+  }
 });
 
 const aiDrivenConversationFlow = ai.defineFlow(
@@ -102,7 +99,7 @@ const aiDrivenConversationFlow = ai.defineFlow(
           return `Student: ${msg.content}`;
         }
         if (msg.role === 'assistant') {
-          return `You: ${msg.content}`;
+          return `Ivy: ${msg.content}`;
         }
         return '';
       })
