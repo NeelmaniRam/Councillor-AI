@@ -12,19 +12,21 @@ import { ScrollArea } from './ui/scroll-area';
 interface ChatViewProps {
   messages: IvyMessage[];
   isThinking: boolean;
-  isListening: boolean;
+  isMicOn: boolean;
+  isDetectingSpeech: boolean;
   liveTranscript: string;
   onSendMessage: (message: string) => void;
-  onMicClick: () => void;
+  onMicToggle: () => void;
 }
 
 export function ChatView({
   messages,
   isThinking,
-  isListening,
+  isMicOn,
+  isDetectingSpeech,
   liveTranscript,
   onSendMessage,
-  onMicClick,
+  onMicToggle,
 }: ChatViewProps) {
   const [userInput, setUserInput] = useState('');
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -48,7 +50,7 @@ export function ChatView({
 
   const getWaveformVariant = () => {
     if (isThinking && messages[messages.length-1]?.role === 'user') return 'speaking';
-    if (isListening) return 'listening';
+    if (isDetectingSpeech) return 'listening';
     return 'idle';
   };
   
@@ -69,11 +71,11 @@ export function ChatView({
                       </div>
                   </div>
               ))}
-              {isListening && (
+              {liveTranscript && (
                    <div className={cn('flex items-end gap-2 justify-end')}>
                       <div className={cn('p-3 rounded-lg max-w-xl bg-primary text-primary-foreground')}>
                          <p className="font-bold text-sm mb-1">Me</p>
-                         <p className="whitespace-pre-wrap">{liveTranscript || '...'}</p>
+                         <p className="whitespace-pre-wrap">{liveTranscript}</p>
                       </div>
                   </div>
               )}
@@ -98,18 +100,18 @@ export function ChatView({
           size="icon"
           className={cn(
             'rounded-full w-20 h-20 border-8 border-background shadow-lg transition-colors',
-            isListening
-              ? 'bg-destructive/80 hover:bg-destructive/90'
-              : 'bg-secondary/20 hover:bg-secondary/30'
+            isMicOn
+              ? 'bg-secondary/20 hover:bg-secondary/30'
+              : 'bg-destructive/80 hover:bg-destructive/90'
           )}
-          aria-label={isListening ? 'Stop Talking' : 'Talk'}
-          onClick={onMicClick}
+          aria-label={isMicOn ? 'Mute Microphone' : 'Unmute Microphone'}
+          onClick={onMicToggle}
           disabled={isThinking}
         >
-          {isListening ? (
-            <MicOff className="w-8 h-8 text-destructive-foreground" />
-          ) : (
+          {isMicOn ? (
             <Mic className="w-8 h-8 text-secondary" />
+          ) : (
+            <MicOff className="w-8 h-8 text-destructive-foreground" />
           )}
         </Button>
         <div className="w-full max-w-lg flex items-center space-x-2 pb-8">
@@ -119,12 +121,12 @@ export function ChatView({
             value={userInput}
             onChange={(e) => setUserInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-            disabled={isThinking || isListening}
+            disabled={isThinking || isMicOn}
             className="h-12 text-base"
           />
           <Button
             onClick={handleSend}
-            disabled={isThinking || isListening || !userInput}
+            disabled={isThinking || isMicOn || !userInput}
             size="lg"
           >
             <Send className="w-5 h-5" />
