@@ -38,7 +38,7 @@ export function ReportView({ report, onRestart }: ReportViewProps) {
             <Download className="mr-2 h-4 w-4" />
             Download PDF
           </Button>
-          <Button onClick={onRestart}>
+          <Button onClick={onRestart} variant="secondary">
             <RotateCcw className="mr-2 h-4 w-4" />
             Start Over
           </Button>

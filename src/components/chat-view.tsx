@@ -65,10 +65,10 @@ export function ChatView({
       <div className="w-full flex flex-col items-center space-y-8 mt-12 px-4">
         <Button
           size="icon"
-          className="rounded-full w-24 h-24 bg-primary/20 hover:bg-primary/30 border-8 border-background shadow-lg"
+          className="rounded-full w-24 h-24 bg-secondary/20 hover:bg-secondary/30 border-8 border-background shadow-lg"
           aria-label="Talk"
         >
-          <Mic className="w-10 h-10 text-primary" />
+          <Mic className="w-10 h-10 text-secondary" />
         </Button>
         <Waveform variant={isThinking ? 'speaking' : 'idle'} />
         <div className="w-full max-w-lg flex items-center space-x-2 pb-8">
