@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useState, useCallback, useTransition, useRef, useEffect } from 'react';
@@ -243,7 +244,20 @@ export function IvyVoiceGuide() {
     };
   
     recognitionRef.current.onerror = (event: any) => {
+      // "network" errors are common and recoverable, so we won't show a disruptive
+      // error. The `onend` handler will automatically restart the recognition service.
+      if (event.error === 'network') {
+        console.log('Speech recognition network error. Service will restart.');
+        return;
+      }
+
+      // "aborted" happens when the mic is turned off or the conversation ends. It's not an error.
+      if (event.error === 'aborted') {
+        return;
+      }
+      
       console.error('Speech recognition error', event.error);
+
       if (event.error === 'not-allowed') {
         toast({
           variant: 'destructive',
@@ -251,6 +265,12 @@ export function IvyVoiceGuide() {
           description: 'Please enable microphone access in your browser settings to use voice features.',
         });
         setIsMicOn(false);
+      } else {
+        toast({
+          variant: 'destructive',
+          title: 'Voice Recognition Error',
+          description: `An unexpected error occurred: ${event.error}`,
+        });
       }
     };
   
@@ -460,3 +480,5 @@ export function IvyVoiceGuide() {
     </div>
   );
 }
+
+    
