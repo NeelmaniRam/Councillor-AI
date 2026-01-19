@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useCallback, useTransition } from 'react';
+import { useState, useCallback, useTransition, useRef, useEffect } from 'react';
 import {
   aiDrivenConversation,
   AIDrivenConversationInput,
 } from '@/ai/flows/ai-driven-conversation';
 import { extractInsights } from '@/ai/flows/real-time-insight-extraction';
+import { textToSpeech } from '@/ai/flows/text-to-speech';
 import type {
   StudentProfile,
   IvyMessage,
@@ -27,10 +28,10 @@ type AppState = 'welcome' | 'context' | 'chat' | 'report';
 export function IvyVoiceGuide() {
   const [appState, setAppState] = useState<AppState>('welcome');
   const [studentProfile, setStudentProfile] = useState<StudentProfile>({
-    name: '',
-    grade: '',
-    curriculum: '',
-    country: '',
+    name: 'Alex',
+    grade: '11th Grade',
+    curriculum: 'IB',
+    country: 'USA',
   });
   const [messages, setMessages] = useState<IvyMessage[]>([]);
   const [insights, setInsights] = useState<Insights>({
@@ -41,8 +42,103 @@ export function IvyVoiceGuide() {
   });
   const [finalReport, setFinalReport] = useState<FinalReport | null>(null);
   const [isThinking, startTransition] = useTransition();
+  const [isListening, setIsListening] = useState(false);
+  const [liveTranscript, setLiveTranscript] = useState('');
+  const [hasBrowserSupport, setHasBrowserSupport] = useState(false);
 
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const recognitionRef = useRef<any>(null);
   const { toast } = useToast();
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const SpeechRecognition =
+        window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (SpeechRecognition) {
+        setHasBrowserSupport(true);
+        const recognition = new SpeechRecognition();
+        recognition.continuous = false;
+        recognition.interimResults = true;
+        recognition.lang = 'en-US';
+        recognitionRef.current = recognition;
+      } else {
+        setHasBrowserSupport(false);
+        toast({
+          title: 'Voice input not supported',
+          description:
+            'Your browser does not support speech recognition. Please type your responses.',
+          variant: 'destructive',
+        });
+      }
+    }
+  }, [toast]);
+
+  const handlePlayAudio = useCallback(async (text: string) => {
+    try {
+      const { media } = await textToSpeech(text);
+      if (audioRef.current && media) {
+        audioRef.current.src = media;
+        audioRef.current.play();
+      } else {
+        throw new Error('Audio element not found or TTS failed.');
+      }
+    } catch (error) {
+      console.error(error);
+      toast({
+        title: 'Could not play audio',
+        description: 'There was an error generating the voice response.',
+        variant: 'destructive',
+      });
+      // Fallback to text-only
+      startTransition(() => {});
+    }
+  }, [toast]);
+
+  const handleListen = useCallback(() => {
+    if (!hasBrowserSupport || isThinking) return;
+
+    if (isListening) {
+      recognitionRef.current?.stop();
+      setIsListening(false);
+      return;
+    }
+
+    setIsListening(true);
+    setLiveTranscript('');
+    let finalTranscript = '';
+
+    recognitionRef.current.onresult = (event: any) => {
+      let interimTranscript = '';
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          finalTranscript += transcript + ' ';
+        } else {
+          interimTranscript += transcript;
+        }
+      }
+      setLiveTranscript(finalTranscript + interimTranscript);
+    };
+
+    recognitionRef.current.onend = () => {
+      setIsListening(false);
+      if (finalTranscript.trim()) {
+        handleSendMessage(finalTranscript.trim());
+      }
+    };
+
+    recognitionRef.current.onerror = (event: any) => {
+      console.error('Speech recognition error', event.error);
+      setIsListening(false);
+      toast({
+        variant: 'destructive',
+        title: 'Speech recognition error',
+        description: event.error,
+      });
+    };
+
+    recognitionRef.current.start();
+  }, [isListening, isThinking, hasBrowserSupport, toast]);
 
   const handleStartConversation = useCallback(async () => {
     if (!studentProfile.name) {
@@ -63,6 +159,7 @@ export function IvyVoiceGuide() {
         const result = await aiDrivenConversation(input);
         if (result.nextPrompt) {
           setMessages([{ role: 'assistant', content: result.nextPrompt }]);
+          await handlePlayAudio(result.nextPrompt);
         }
       } catch (error) {
         console.error(error);
@@ -74,7 +171,7 @@ export function IvyVoiceGuide() {
         setAppState('context');
       }
     });
-  }, [studentProfile, toast]);
+  }, [studentProfile, toast, handlePlayAudio]);
 
   const handleSendMessage = useCallback(
     async (userInput: string) => {
@@ -88,12 +185,11 @@ export function IvyVoiceGuide() {
 
       startTransition(async () => {
         try {
-          // 1. Extract insights from user response
           const insightResult = await extractInsights({
             studentResponse: userInput,
             existingInsights: JSON.stringify(insights),
           });
-          
+
           const updatedInsights: Insights = {
             interests: [...new Set([...insights.interests, ...insightResult.interests.split(',').map(s => s.trim()).filter(Boolean)])],
             strengths: [...new Set([...insights.strengths, ...insightResult.strengths.split(',').map(s => s.trim()).filter(Boolean)])],
@@ -102,7 +198,6 @@ export function IvyVoiceGuide() {
           };
           setInsights(updatedInsights);
 
-          // 2. Get next AI prompt
           const convResult = await aiDrivenConversation({
             ...studentProfile,
             conversationHistory: newMessages.map((m) => ({
@@ -117,9 +212,9 @@ export function IvyVoiceGuide() {
               ...prev,
               { role: 'assistant', content: convResult.nextPrompt },
             ]);
+            await handlePlayAudio(convResult.nextPrompt);
           }
 
-          // 3. Check for convergence to report
           if (convResult.careerPaths && convResult.careerPaths.length > 0) {
             setFinalReport({
               studentProfile,
@@ -136,11 +231,11 @@ export function IvyVoiceGuide() {
             description: 'The AI assistant ran into a problem. Please try again.',
             variant: 'destructive',
           });
-          setMessages(messages); // Revert messages on error
+          setMessages(messages);
         }
       });
     },
-    [messages, insights, studentProfile, toast]
+    [messages, insights, studentProfile, toast, handlePlayAudio]
   );
   
   const handleRestart = () => {
@@ -149,6 +244,11 @@ export function IvyVoiceGuide() {
     setMessages([]);
     setInsights({ interests: [], strengths: [], constraints: [], careerClusters: [] });
     setFinalReport(null);
+  };
+  
+  const onAudioEnded = () => {
+    startTransition(() => {}); // This will set isThinking to false
+    handleListen();
   };
 
   const renderContent = () => {
@@ -250,7 +350,10 @@ export function IvyVoiceGuide() {
           <ChatView
             messages={messages}
             isThinking={isThinking}
+            isListening={isListening}
+            liveTranscript={liveTranscript}
             onSendMessage={handleSendMessage}
+            onMicClick={handleListen}
           />
         );
       case 'report':
@@ -262,6 +365,7 @@ export function IvyVoiceGuide() {
 
   return (
     <div className="flex h-screen bg-background text-foreground">
+      <audio ref={audioRef} onEnded={onAudioEnded} />
       <main className="flex-1 flex flex-col p-4 md:p-8 overflow-y-auto">
         {renderContent()}
       </main>
