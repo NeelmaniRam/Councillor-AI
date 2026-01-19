@@ -57,10 +57,7 @@ Curriculum: {{{curriculum}}}
 Country: {{{country}}}
 
 Conversation History:
-{{#each conversationHistory}}
-{{#if (eq role \"user\")}}Student: {{content}}{{/if}}
-{{#if (eq role \"assistant\")}}You: {{content}}{{/if}}
-{{/each}}
+{{{formattedConversationHistory}}}
 
 Extracted Insights:
 Interests: {{insights.interests}}
@@ -81,9 +78,13 @@ Phase 7: Convergence
 
 Output only the next prompt.`;
 
+const PromptInputSchema = AIDrivenConversationInputSchema.extend({
+  formattedConversationHistory: z.string().optional(),
+});
+
 const aiDrivenConversationPrompt = ai.definePrompt({
   name: 'aiDrivenConversationPrompt',
-  input: {schema: AIDrivenConversationInputSchema},
+  input: {schema: PromptInputSchema},
   output: {schema: AIDrivenConversationOutputSchema},
   prompt: systemPromptContent,
 });
@@ -95,7 +96,22 @@ const aiDrivenConversationFlow = ai.defineFlow(
     outputSchema: AIDrivenConversationOutputSchema,
   },
   async input => {
-    const {output} = await aiDrivenConversationPrompt(input);
+    const formattedConversationHistory = (input.conversationHistory || [])
+      .map(msg => {
+        if (msg.role === 'user') {
+          return `Student: ${msg.content}`;
+        }
+        if (msg.role === 'assistant') {
+          return `You: ${msg.content}`;
+        }
+        return '';
+      })
+      .join('\n');
+    
+    const {output} = await aiDrivenConversationPrompt({
+      ...input,
+      formattedConversationHistory,
+    });
     return output!;
   }
 );
