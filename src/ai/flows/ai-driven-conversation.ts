@@ -3,7 +3,7 @@
 /**
  * @fileOverview A voice-based AI career guide conversation flow.
  *
- * - aiDrivenConversation - A function that initiates and manages the career discovery conversation.
+ * - aiDrivenConversation- A function that initiates and manages the career discovery conversation.
  * - AIDrivenConversationInput - The input type for the aiDrivenConversation function.
  * - AIDrivenConversationOutput - The return type for the aiDrivenConversation function.
  */
