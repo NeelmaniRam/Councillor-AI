@@ -6,6 +6,7 @@ import {
   AIDrivenConversationInput,
 } from '@/ai/flows/ai-driven-conversation';
 import { textToSpeech } from '@/ai/flows/text-to-speech';
+import { generateCareerReport } from '@/ai/flows/generate-career-report';
 import type {
   StudentProfile,
   IvyMessage,
@@ -108,8 +109,8 @@ export function IvyVoiceGuide() {
     });
   }, []);
   
-  const handleSessionEnd = useCallback(() => {
-    console.log('Session timer ended. Handling session end.');
+  const handleSessionEnd = useCallback(async () => {
+    console.log('Session ended. Generating report.');
     setIsTimerRunning(false);
     if (isMicOn) {
       setIsMicOn(false);
@@ -122,17 +123,36 @@ export function IvyVoiceGuide() {
     stopTypingEffect();
     setAppState('evaluating');
 
-    setTimeout(() => {
-      console.log('Evaluation period ended. Generating final report.');
+    try {
+      console.log('Calling generateCareerReport flow...');
+      const reportData = await generateCareerReport({ studentProfile, insights });
+      console.log('generateCareerReport result:', reportData);
+
       setFinalReport({
         studentProfile,
-        ...insights,
-        recommendedPaths: insights.careerClusters.map((p) => ({ name: p })),
-        reasoning: 'Based on the insights gathered during your conversation, here are some career clusters that align with your interests and strengths. Further exploration into specific roles within these clusters is recommended.',
+        interests: reportData.interests,
+        strengths: reportData.strengths,
+        constraints: insights.constraints,
+        careerClusters: insights.careerClusters,
+        recommendedPaths: reportData.recommendedPaths,
       });
-      setAppState('report');
-    }, 10000); // 10-second evaluation simulation
-  }, [isMicOn, insights, studentProfile, stopTypingEffect]);
+
+      // Show evaluating screen for a few seconds for effect
+      setTimeout(() => {
+          setAppState('report');
+      }, 3000);
+
+    } catch (error) {
+      console.error('Error generating final report:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Report Generation Failed',
+        description: 'There was an issue creating your career report. Please try again.',
+      });
+      // Go back to the chat screen if report fails.
+      setAppState('chat');
+    }
+  }, [isMicOn, insights, studentProfile, stopTypingEffect, toast]);
 
   // Effect for session timer
   useEffect(() => {
@@ -246,6 +266,21 @@ export function IvyVoiceGuide() {
         if (convResult.nextPrompt) {
           handlePlayAudio(convResult.nextPrompt);
         }
+
+        if (convResult.careerPaths && convResult.careerPaths.length > 0) {
+          // The conversation is over, wait for the last audio to finish playing, then generate report
+          const audio = audioRef.current;
+          const onAudioEnd = () => {
+            handleSessionEnd();
+            audio?.removeEventListener('ended', onAudioEnd);
+          };
+           // If audio is already paused/ended (e.g. user barged in), fire immediately.
+          if (audio?.paused) {
+            onAudioEnd();
+          } else {
+            audio?.addEventListener('ended', onAudioEnd);
+          }
+        }
       } catch (error) {
         console.error('handleSendMessage error:', error);
         toast({
@@ -256,7 +291,7 @@ export function IvyVoiceGuide() {
         setMessages(messages);
       }
     });
-  }, [isThinking, messages, studentProfile, insights, handlePlayAudio, stopTypingEffect, toast]);
+  }, [isThinking, messages, studentProfile, insights, handlePlayAudio, stopTypingEffect, toast, handleSessionEnd]);
 
   const setupRecognition = useCallback(() => {
     if (!recognitionRef.current) return;

@@ -17,14 +17,17 @@ export type Insights = {
   careerClusters: string[];
 };
 
+export type RecommendedPath = {
+  name: string;
+  whyItFits: string[];
+  applicationReadiness: string[];
+};
+
 export type FinalReport = {
   studentProfile: StudentProfile;
   interests: string[];
   strengths: string[];
   constraints: string[];
   careerClusters: string[];
-  recommendedPaths: {
-    name: string;
-  }[];
-  reasoning: string;
+  recommendedPaths: RecommendedPath[];
 };
