@@ -12,6 +12,7 @@ import {
   Download,
   RotateCcw,
   FileText,
+  ShieldAlert,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/card';
 import { Button } from './ui/button';
@@ -85,7 +86,7 @@ export function ReportView({ report, onRestart, messages }: ReportViewProps) {
         <Separator className="my-6" />
 
         <div className="grid md:grid-cols-2 gap-8">
-          <Card className="border-none shadow-none">
+          {report.interests.length > 0 && <Card className="border-none shadow-none">
             <CardHeader>
               <CardTitle className="flex items-center"><Sparkles className="w-5 h-5 mr-2 text-accent" />Top Interests</CardTitle>
             </CardHeader>
@@ -94,8 +95,8 @@ export function ReportView({ report, onRestart, messages }: ReportViewProps) {
                 {report.interests.map((item, i) => <li key={i}>{item}</li>)}
               </ul>
             </CardContent>
-          </Card>
-          <Card className="border-none shadow-none">
+          </Card>}
+          {report.strengths.length > 0 && <Card className="border-none shadow-none">
             <CardHeader>
               <CardTitle className="flex items-center"><Compass className="w-5 h-5 mr-2 text-accent" />Key Strengths</CardTitle>
             </CardHeader>
@@ -104,9 +105,34 @@ export function ReportView({ report, onRestart, messages }: ReportViewProps) {
                 {report.strengths.map((item, i) => <li key={i}>{item}</li>)}
               </ul>
             </CardContent>
-          </Card>
+          </Card>}
         </div>
 
+        {(report.constraints.length > 0 || report.careerClusters.length > 0) && <Separator className="my-6" />}
+
+        <div className="grid md:grid-cols-2 gap-8">
+            {report.constraints.length > 0 && <Card className="border-none shadow-none">
+                <CardHeader>
+                <CardTitle className="flex items-center"><ShieldAlert className="w-5 h-5 mr-2 text-accent" />Constraints & Preferences</CardTitle>
+                </CardHeader>
+                <CardContent>
+                <ul className="list-disc list-inside space-y-1">
+                    {report.constraints.map((item, i) => <li key={i}>{item}</li>)}
+                </ul>
+                </CardContent>
+            </Card>}
+            {report.careerClusters.length > 0 && <Card className="border-none shadow-none">
+                <CardHeader>
+                <CardTitle className="flex items-center"><Briefcase className="w-5 h-5 mr-2 text-accent" />Suggested Career Clusters</CardTitle>
+                </CardHeader>
+                <CardContent>
+                <ul className="list-disc list-inside space-y-1">
+                    {report.careerClusters.map((item, i) => <li key={i}>{item}</li>)}
+                </ul>
+                </CardContent>
+            </Card>}
+        </div>
+        
         <Separator className="my-6" />
 
         <Card className="border-none shadow-none">
@@ -115,11 +141,15 @@ export function ReportView({ report, onRestart, messages }: ReportViewProps) {
             <CardDescription>{report.reasoning}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {report.recommendedPaths.map((path, i) => (
-              <div key={i} className="p-4 bg-background rounded-lg border print-break-inside-avoid">
-                <h4 className="font-semibold text-lg text-primary">{path.name}</h4>
-              </div>
-            ))}
+            {report.recommendedPaths.length > 0 ? (
+                report.recommendedPaths.map((path, i) => (
+                    <div key={i} className="p-4 bg-background rounded-lg border print-break-inside-avoid">
+                      <h4 className="font-semibold text-lg text-primary">{path.name}</h4>
+                    </div>
+                ))
+            ) : (
+                <p className='text-muted-foreground'>No specific career paths were finalized in this session. Continue your conversation with Ivy to explore more options!</p>
+            )}
           </CardContent>
         </Card>
       </div>

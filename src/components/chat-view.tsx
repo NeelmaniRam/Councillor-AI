@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { Mic, Send, MicOff } from 'lucide-react';
+import { Mic, Send, MicOff, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Waveform } from '@/components/waveform';
@@ -17,6 +17,8 @@ interface ChatViewProps {
   liveTranscript: string;
   onSendMessage: (message: string) => void;
   onMicToggle: () => void;
+  timer: number;
+  isTimerRunning: boolean;
 }
 
 export function ChatView({
@@ -27,6 +29,8 @@ export function ChatView({
   liveTranscript,
   onSendMessage,
   onMicToggle,
+  timer,
+  isTimerRunning,
 }: ChatViewProps) {
   const [userInput, setUserInput] = useState('');
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -54,9 +58,18 @@ export function ChatView({
     return 'idle';
   };
   
+  const minutes = Math.floor(timer / 60).toString().padStart(2, '0');
+  const seconds = (timer % 60).toString().padStart(2, '0');
+
   return (
     <div className="flex flex-col h-full justify-between items-center max-w-4xl mx-auto w-full">
-      <ScrollArea className="w-full flex-1" ref={scrollAreaRef} viewportRef={viewportRef}>
+      {isTimerRunning && (
+        <div className="w-full py-2 px-4 text-center font-mono text-lg font-semibold bg-muted sticky top-0 z-10 flex items-center justify-center gap-2 border-b">
+          <Clock className="w-5 h-5" />
+          <span>Session ends in: {minutes}:{seconds}</span>
+        </div>
+      )}
+      <ScrollArea className="w-full flex-1" viewportRef={viewportRef}>
           <div className="px-4 py-8 space-y-4">
               {messages.map((message, index) => (
                   <div key={index} className={cn('flex items-end gap-2', message.role === 'user' ? 'justify-end' : 'justify-start')}>

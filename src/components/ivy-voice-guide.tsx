@@ -22,11 +22,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { IvyNotes } from '@/components/ivy-notes';
 import { ChatView } from '@/components/chat-view';
 import { ReportView } from '@/components/report-view';
+import { Loader2 } from 'lucide-react';
 
-type AppState = 'welcome' | 'context' | 'chat' | 'report';
+type AppState = 'welcome' | 'context' | 'chat' | 'evaluating' | 'report';
 
 const TYPING_SPEED = 50; // ms per character
 const UTTERANCE_PAUSE_DURATION = 1200; // ms to wait after user stops talking
+const SESSION_DURATION = 300; // 5 minutes in seconds
 
 export function IvyVoiceGuide() {
   const [appState, setAppState] = useState<AppState>('welcome');
@@ -52,6 +54,10 @@ export function IvyVoiceGuide() {
   const [liveTranscript, setLiveTranscript] = useState('');
   const [hasBrowserSupport, setHasBrowserSupport] = useState(false);
 
+  // Timer state
+  const [timer, setTimer] = useState(SESSION_DURATION);
+  const [isTimerRunning, setIsTimerRunning] = useState(false);
+
   const audioRef = useRef<HTMLAudioElement>(null);
   const recognitionRef = useRef<any>(null);
   const typingIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -60,11 +66,14 @@ export function IvyVoiceGuide() {
 
   const { toast } = useToast();
 
+  // Effect for browser support check and recognition setup
   useEffect(() => {
+    console.log('Component mounted. Checking for browser support.');
     if (typeof window !== 'undefined') {
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       if (SpeechRecognition) {
         setHasBrowserSupport(true);
+        console.log('SpeechRecognition API supported.');
         const recognition = new SpeechRecognition();
         recognition.continuous = true;
         recognition.interimResults = true;
@@ -72,6 +81,7 @@ export function IvyVoiceGuide() {
         recognitionRef.current = recognition;
       } else {
         setHasBrowserSupport(false);
+        console.warn('SpeechRecognition API not supported.');
         toast({
           title: 'Voice input not supported',
           description: 'Your browser does not support speech recognition. Please type your responses.',
@@ -80,7 +90,7 @@ export function IvyVoiceGuide() {
       }
     }
   }, [toast]);
-  
+
   const stopTypingEffect = useCallback((fullText?: string) => {
     if (typingIntervalRef.current) {
       clearInterval(typingIntervalRef.current);
@@ -99,12 +109,54 @@ export function IvyVoiceGuide() {
     });
   }, []);
   
+  const handleSessionEnd = useCallback(() => {
+    console.log('Session timer ended. Handling session end.');
+    setIsTimerRunning(false);
+    if (isMicOn) {
+      setIsMicOn(false);
+      recognitionRef.current?.stop();
+      console.log('Microphone stopped.');
+    }
+    if (audioRef.current) {
+      audioRef.current.pause();
+    }
+    stopTypingEffect();
+    setAppState('evaluating');
+
+    setTimeout(() => {
+      console.log('Evaluation period ended. Generating final report.');
+      setFinalReport({
+        studentProfile,
+        ...insights,
+        recommendedPaths: insights.careerClusters.map((p) => ({ name: p })),
+        reasoning: 'Based on the insights gathered during your conversation, here are some career clusters that align with your interests and strengths. Further exploration into specific roles within these clusters is recommended.',
+      });
+      setAppState('report');
+    }, 10000); // 10-second evaluation simulation
+  }, [isMicOn, insights, studentProfile, stopTypingEffect]);
+
+  // Effect for session timer
+  useEffect(() => {
+    let interval: NodeJS.Timeout | null = null;
+    if (isTimerRunning && timer > 0) {
+      interval = setInterval(() => {
+        setTimer((prevTimer) => prevTimer - 1);
+      }, 1000);
+    } else if (timer <= 0 && isTimerRunning) {
+      handleSessionEnd();
+    }
+    return () => {
+      if (interval) {
+        clearInterval(interval);
+      }
+    };
+  }, [isTimerRunning, timer, handleSessionEnd]);
+  
   const startTypingEffect = useCallback((text: string, audioDuration: number) => {
     stopTypingEffect();
     setMessages(prev => [...prev, { role: 'assistant', content: '▒' }]);
   
     let charIndex = 0;
-    // Adjust typing speed based on audio length for better sync
     const calculatedTypingSpeed = audioDuration > 0 && text.length > 0
       ? (audioDuration * 1000) / text.length
       : TYPING_SPEED;
@@ -128,12 +180,18 @@ export function IvyVoiceGuide() {
   }, [stopTypingEffect]);
 
   const handlePlayAudio = useCallback(async (text: string) => {
+    console.log('Playing audio for:', text);
+    if (!isTimerRunning) {
+      console.log('Starting session timer.');
+      setIsTimerRunning(true);
+    }
     try {
       const { media } = await textToSpeech(text);
       if (audioRef.current && media) {
         audioRef.current.src = media;
         audioRef.current.onloadedmetadata = () => {
           const duration = audioRef.current?.duration || 0;
+          console.log(`Audio duration: ${duration}s`);
           startTypingEffect(text, duration);
           audioRef.current?.play();
         };
@@ -141,21 +199,21 @@ export function IvyVoiceGuide() {
         throw new Error('Audio element not found or TTS failed.');
       }
     } catch (error) {
-      console.error(error);
+      console.error('handlePlayAudio error:', error);
       toast({
         title: 'Could not play audio',
         description: 'There was an error generating the voice response.',
         variant: 'destructive',
       });
-      startTypingEffect(text, 0); // Type out text even if audio fails
+      startTypingEffect(text, 0); 
       startTransition(() => {});
     }
-  }, [toast, startTypingEffect]);
+  }, [toast, startTypingEffect, isTimerRunning]);
 
   const handleSendMessage = useCallback(async (userInput: string) => {
     if (!userInput.trim() || isThinking) return;
+    console.log('Sending message:', userInput);
 
-    // Clear any pending utterance timeouts
     if (utteranceTimeoutRef.current) clearTimeout(utteranceTimeoutRef.current);
     finalTranscriptRef.current = '';
     setLiveTranscript('');
@@ -166,13 +224,15 @@ export function IvyVoiceGuide() {
 
     startTransition(async () => {
       try {
+        console.log('Calling aiDrivenConversation flow...');
         const convResult = await aiDrivenConversation({
           ...studentProfile,
           conversationHistory: newMessages.map(m => ({ role: m.role, content: m.content })),
           insights,
         });
+        console.log('aiDrivenConversation result:', convResult);
         
-        startTransition(() => {}); // Set isThinking to false
+        startTransition(() => {});
 
         if (convResult.updatedInsights) {
            const updated = convResult.updatedInsights;
@@ -185,40 +245,28 @@ export function IvyVoiceGuide() {
         }
 
         if (convResult.nextPrompt) {
-          if (convResult.careerPaths && convResult.careerPaths.length > 0) {
-            setMessages(prev => [...prev, { role: 'assistant', content: convResult.nextPrompt! }]);
-            setFinalReport({
-              studentProfile,
-              ...insights,
-              recommendedPaths: convResult.careerPaths.map((p) => ({ name: p })),
-              reasoning: convResult.nextPrompt || 'Based on your conversation.',
-            });
-            setAppState('report');
-            setIsMicOn(false);
-            recognitionRef.current?.stop();
-            return;
-          }
           handlePlayAudio(convResult.nextPrompt);
         }
       } catch (error) {
-        console.error(error);
+        console.error('handleSendMessage error:', error);
         toast({
           title: 'An error occurred',
           description: 'The AI assistant ran into a problem. Please try again.',
           variant: 'destructive',
         });
-        setMessages(messages); // Revert to previous messages on error
+        setMessages(messages);
       }
     });
   }, [isThinking, messages, studentProfile, insights, handlePlayAudio, stopTypingEffect, toast]);
 
   const setupRecognition = useCallback(() => {
     if (!recognitionRef.current) return;
+    console.log('Setting up speech recognition handlers.');
   
     recognitionRef.current.onresult = (event: any) => {
-      // Barge-in: if Ivy is speaking, pause her.
       if (audioRef.current && !audioRef.current.paused) {
-        audioRef.current.pause(); // onpause handler will call stopTypingEffect
+        audioRef.current.pause();
+        console.log('Barge-in detected. Pausing Ivy\'s speech.');
       }
       if (utteranceTimeoutRef.current) {
         clearTimeout(utteranceTimeoutRef.current);
@@ -238,26 +286,23 @@ export function IvyVoiceGuide() {
       utteranceTimeoutRef.current = setTimeout(() => {
         const textToSend = finalTranscriptRef.current.trim();
         if (textToSend) {
+          console.log('Utterance detected:', textToSend);
           handleSendMessage(textToSend);
         }
       }, UTTERANCE_PAUSE_DURATION);
     };
   
     recognitionRef.current.onerror = (event: any) => {
-      // "network" errors are common and recoverable, so we won't show a disruptive
-      // error. The `onend` handler will automatically restart the recognition service.
       if (event.error === 'network') {
         console.log('Speech recognition network error. Service will restart.');
         return;
       }
-
-      // "aborted" happens when the mic is turned off or the conversation ends. It's not an error.
       if (event.error === 'aborted') {
+        console.log('Speech recognition aborted (e.g., mic off). This is normal.');
         return;
       }
       
-      console.error('Speech recognition error', event.error);
-
+      console.error('Speech recognition error:', event.error);
       if (event.error === 'not-allowed') {
         toast({
           variant: 'destructive',
@@ -275,13 +320,21 @@ export function IvyVoiceGuide() {
     };
   
     recognitionRef.current.onend = () => {
+      console.log('Speech recognition service ended.');
       if (isMicOn) {
+        console.log('Mic is on, restarting recognition service.');
         recognitionRef.current.start();
       }
     };
   
-    recognitionRef.current.onaudiostart = () => setIsDetectingSpeech(true);
-    recognitionRef.current.onaudioend = () => setIsDetectingSpeech(false);
+    recognitionRef.current.onaudiostart = () => {
+      console.log('Audio capture started.');
+      setIsDetectingSpeech(true);
+    };
+    recognitionRef.current.onaudioend = () => {
+      console.log('Audio capture ended.');
+      setIsDetectingSpeech(false);
+    };
   
   }, [isMicOn, handleSendMessage, toast]);
 
@@ -298,13 +351,16 @@ export function IvyVoiceGuide() {
     setIsMicOn(newMicState);
 
     if (newMicState) {
+      console.log('Mic toggled on.');
       recognitionRef.current?.start();
     } else {
+      console.log('Mic toggled off.');
       recognitionRef.current?.stop();
     }
   };
 
   const handleStartConversation = useCallback(async () => {
+    console.log('Attempting to start conversation.');
     if (!studentProfile.name) {
       toast({
         title: 'Missing Information',
@@ -320,6 +376,7 @@ export function IvyVoiceGuide() {
     startTransition(async () => {
       try {
         const input: AIDrivenConversationInput = { ...studentProfile, conversationHistory: [], insights };
+        console.log('Sending initial prompt to AI.');
         const result = await aiDrivenConversation(input);
         startTransition(() => {});
         
@@ -327,7 +384,7 @@ export function IvyVoiceGuide() {
         if (result.nextPrompt) handlePlayAudio(result.nextPrompt);
 
       } catch (error) {
-        console.error(error);
+        console.error('handleStartConversation error:', error);
         toast({
           title: 'Error',
           description: 'Could not start conversation.',
@@ -339,6 +396,7 @@ export function IvyVoiceGuide() {
   }, [studentProfile, insights, toast, handlePlayAudio]);
 
   const handleRestart = () => {
+    console.log('Restarting session.');
     setAppState('welcome');
     setStudentProfile({ name: '', grade: '', curriculum: '', country: '' });
     setMessages([]);
@@ -348,6 +406,8 @@ export function IvyVoiceGuide() {
     recognitionRef.current?.stop();
     stopTypingEffect();
     if(audioRef.current) audioRef.current.pause();
+    setTimer(SESSION_DURATION);
+    setIsTimerRunning(false);
   };
   
   const onAudioEnded = () => stopTypingEffect();
@@ -457,7 +517,21 @@ export function IvyVoiceGuide() {
             liveTranscript={liveTranscript}
             onSendMessage={handleSendMessage}
             onMicToggle={handleMicToggle}
+            timer={timer}
+            isTimerRunning={isTimerRunning}
           />
+        );
+      case 'evaluating':
+        return (
+          <div className="flex flex-col items-center justify-center h-full text-center">
+            <Loader2 className="w-16 h-16 text-primary mb-6 animate-spin" />
+            <h1 className="text-3xl font-bold font-headline mb-2">
+              Ivy is Evaluating...
+            </h1>
+            <p className="text-muted-foreground text-lg max-w-md">
+              Your conversation is being analyzed to generate a personalized career discovery report.
+            </p>
+          </div>
         );
       case 'report':
         return finalReport ? (
@@ -480,5 +554,3 @@ export function IvyVoiceGuide() {
     </div>
   );
 }
-
-    
