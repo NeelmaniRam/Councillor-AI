@@ -2,6 +2,7 @@ export type StudentProfile = {
   name: string;
   grade: string;
   curriculum: string;
+  stream: string;
   country: string;
 };
 

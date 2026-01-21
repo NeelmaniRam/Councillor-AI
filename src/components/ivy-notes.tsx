@@ -11,6 +11,7 @@ import {
   GraduationCap,
   Globe,
   Map,
+  Layers,
 } from 'lucide-react';
 import { ScrollArea } from './ui/scroll-area';
 
@@ -55,6 +56,7 @@ export function IvyNotes({ studentProfile, insights }: IvyNotesProps) {
     { icon: User, label: 'Name', value: studentProfile.name },
     { icon: GraduationCap, label: 'Grade', value: studentProfile.grade },
     { icon: BookOpen, label: 'Curriculum', value: studentProfile.curriculum },
+    { icon: Layers, label: 'Stream', value: studentProfile.stream },
     { icon: Globe, label: 'Country', value: studentProfile.country },
   ].filter((item) => item.value);
 

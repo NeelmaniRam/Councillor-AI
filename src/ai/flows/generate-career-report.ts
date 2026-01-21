@@ -15,6 +15,7 @@ const GenerateCareerReportInputSchema = z.object({
     name: z.string(),
     grade: z.string(),
     curriculum: z.string(),
+    stream: z.string(),
     country: z.string(),
   }),
   insights: z.object({
@@ -53,6 +54,7 @@ const generateCareerReportPrompt = ai.definePrompt({
   **Student Information:**
   - Name: {{{studentProfile.name}}}
   - Grade: {{{studentProfile.grade}}}
+  - Stream: {{{studentProfile.stream}}}
   - Full Profile & Conversation Insights: {{{json insights}}}
 
   **Your Task:**

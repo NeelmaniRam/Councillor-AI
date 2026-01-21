@@ -23,20 +23,25 @@ import { IvyNotes } from '@/components/ivy-notes';
 import { ChatView } from '@/components/chat-view';
 import { ReportView } from '@/components/report-view';
 import { Loader2 } from 'lucide-react';
+import { Mic, Speech } from 'lucide-react';
 
-type AppState = 'welcome' | 'context' | 'chat' | 'evaluating' | 'report';
+type AppState = 'welcome' | 'entry-method' | 'context' | 'chat' | 'evaluating' | 'report';
+type OnboardingStep = 'name' | 'grade' | 'curriculum' | 'stream' | 'country' | 'done';
 
 const TYPING_SPEED = 50; // ms per character
 const UTTERANCE_PAUSE_DURATION = 1200; // ms to wait after user stops talking
-const SESSION_DURATION = 300; // 5 minutes in seconds
+const SESSION_DURATION = 900; // 15 minutes in seconds
+const EVALUATION_DELAY = 10000; // 10 seconds
 
 export function IvyVoiceGuide() {
   const [appState, setAppState] = useState<AppState>('welcome');
+  const [onboardingStep, setOnboardingStep] = useState<OnboardingStep>('name');
   const [studentProfile, setStudentProfile] = useState<StudentProfile>({
-    name: 'Alex',
-    grade: '11th Grade',
-    curriculum: 'IB',
-    country: 'USA',
+    name: '',
+    grade: '',
+    curriculum: '',
+    stream: '',
+    country: '',
   });
   const [messages, setMessages] = useState<IvyMessage[]>([]);
   const [insights, setInsights] = useState<Insights>({
@@ -137,10 +142,9 @@ export function IvyVoiceGuide() {
         recommendedPaths: reportData.recommendedPaths,
       });
 
-      // Show evaluating screen for a few seconds for effect
       setTimeout(() => {
           setAppState('report');
-      }, 3000);
+      }, EVALUATION_DELAY);
 
     } catch (error) {
       console.error('Error generating final report:', error);
@@ -149,7 +153,6 @@ export function IvyVoiceGuide() {
         title: 'Report Generation Failed',
         description: 'There was an issue creating your career report. Please try again.',
       });
-      // Go back to the chat screen if report fails.
       setAppState('chat');
     }
   }, [isMicOn, insights, studentProfile, stopTypingEffect, toast]);
@@ -229,6 +232,61 @@ export function IvyVoiceGuide() {
     }
   }, [toast, startTypingEffect, isTimerRunning]);
 
+    const handleOnboardingResponse = useCallback((userInput: string) => {
+    let nextStep: OnboardingStep = onboardingStep;
+    let nextQuestion = '';
+    const updatedProfile = { ...studentProfile, [onboardingStep]: userInput.trim() };
+    setStudentProfile(updatedProfile);
+
+    switch (onboardingStep) {
+        case 'name':
+            nextStep = 'grade';
+            nextQuestion = `Great to meet you, ${userInput.trim()}! What grade are you in?`;
+            break;
+        case 'grade':
+            nextStep = 'curriculum';
+            nextQuestion = `Got it. Which curriculum are you following, like CBSE or IB?`;
+            break;
+        case 'curriculum':
+            nextStep = 'stream';
+            nextQuestion = `Thanks. And what's your academic stream, for example, Science, Commerce, or Arts?`;
+            break;
+        case 'stream':
+            nextStep = 'country';
+            nextQuestion = `Perfect. Lastly, which country are you studying in?`;
+            break;
+        case 'country':
+            nextStep = 'done';
+            // Transition to the main conversation handled below
+            break;
+    }
+
+    setOnboardingStep(nextStep);
+    
+    startTransition(async () => {
+      if (nextStep !== 'done') {
+        handlePlayAudio(nextQuestion);
+      } else {
+        // Onboarding is done, start the actual conversation
+        try {
+            console.log('Onboarding complete. Starting main conversation flow.');
+            const input: AIDrivenConversationInput = { ...updatedProfile, conversationHistory: [], insights };
+            const result = await aiDrivenConversation(input);
+            startTransition(() => {});
+            if (result.updatedInsights) setInsights(result.updatedInsights as Insights);
+            if (result.nextPrompt) handlePlayAudio(result.nextPrompt);
+        } catch (error) {
+            console.error('Error starting main conversation:', error);
+            toast({
+                title: 'Error',
+                description: 'Could not start the conversation.',
+                variant: 'destructive',
+            });
+        }
+      }
+    });
+  }, [onboardingStep, studentProfile, insights, handlePlayAudio, toast]);
+
   const handleSendMessage = useCallback(async (userInput: string) => {
     if (!userInput.trim() || isThinking) return;
     console.log('Sending message:', userInput);
@@ -240,6 +298,11 @@ export function IvyVoiceGuide() {
 
     const newMessages: IvyMessage[] = [...messages, { role: 'user', content: userInput }];
     setMessages(newMessages);
+    
+    if (onboardingStep !== 'done') {
+      handleOnboardingResponse(userInput);
+      return;
+    }
 
     startTransition(async () => {
       try {
@@ -267,14 +330,12 @@ export function IvyVoiceGuide() {
           handlePlayAudio(convResult.nextPrompt);
         }
 
-        if (convResult.careerPaths && convResult.careerPaths.length > 0) {
-          // The conversation is over, wait for the last audio to finish playing, then generate report
+        if (convResult.isConcluding) {
           const audio = audioRef.current;
           const onAudioEnd = () => {
             handleSessionEnd();
             audio?.removeEventListener('ended', onAudioEnd);
           };
-           // If audio is already paused/ended (e.g. user barged in), fire immediately.
           if (audio?.paused) {
             onAudioEnd();
           } else {
@@ -291,7 +352,7 @@ export function IvyVoiceGuide() {
         setMessages(messages);
       }
     });
-  }, [isThinking, messages, studentProfile, insights, handlePlayAudio, stopTypingEffect, toast, handleSessionEnd]);
+  }, [isThinking, messages, studentProfile, insights, handlePlayAudio, stopTypingEffect, toast, handleSessionEnd, onboardingStep, handleOnboardingResponse]);
 
   const setupRecognition = useCallback(() => {
     if (!recognitionRef.current) return;
@@ -397,8 +458,8 @@ export function IvyVoiceGuide() {
     }
   };
 
-  const handleStartConversation = useCallback(async () => {
-    console.log('Attempting to start conversation.');
+  const handleStartTextConversation = useCallback(async () => {
+    console.log('Attempting to start text conversation.');
     if (!studentProfile.name) {
       toast({
         title: 'Missing Information',
@@ -422,7 +483,7 @@ export function IvyVoiceGuide() {
         if (result.nextPrompt) handlePlayAudio(result.nextPrompt);
 
       } catch (error) {
-        console.error('handleStartConversation error:', error);
+        console.error('handleStartTextConversation error:', error);
         toast({
           title: 'Error',
           description: 'Could not start conversation.',
@@ -433,10 +494,19 @@ export function IvyVoiceGuide() {
     });
   }, [studentProfile, insights, toast, handlePlayAudio]);
 
+  const handleStartVoiceOnboarding = useCallback(async () => {
+    setAppState('chat');
+    setIsMicOn(true);
+    recognitionRef.current?.start();
+    startTransition(() => {
+        handlePlayAudio("Welcome to IvyVoice! To start our discovery session, what's your name?");
+    });
+  }, [handlePlayAudio]);
+
   const handleRestart = () => {
     console.log('Restarting session.');
     setAppState('welcome');
-    setStudentProfile({ name: '', grade: '', curriculum: '', country: '' });
+    setStudentProfile({ name: '', grade: '', curriculum: '', stream: '', country: '' });
     setMessages([]);
     setInsights({ interests: [], strengths: [], constraints: [], careerClusters: [] });
     setFinalReport(null);
@@ -446,6 +516,7 @@ export function IvyVoiceGuide() {
     if(audioRef.current) audioRef.current.pause();
     setTimer(SESSION_DURATION);
     setIsTimerRunning(false);
+    setOnboardingStep('name');
   };
   
   const onAudioEnded = () => stopTypingEffect();
@@ -464,10 +535,28 @@ export function IvyVoiceGuide() {
               Your personal, voice-guided career discovery journey. Let's find a
               future that fits you best.
             </p>
-            <Button size="lg" onClick={() => setAppState('context')}>
+            <Button size="lg" onClick={() => setAppState('entry-method')}>
               Begin Discovery
             </Button>
           </div>
+        );
+      case 'entry-method':
+        return (
+            <div className="flex flex-col items-center justify-center h-full text-center">
+                <h1 className="text-3xl font-bold font-headline mb-4">How would you like to start?</h1>
+                <p className="text-muted-foreground text-lg max-w-md mb-8">
+                You can either type in your details or talk directly to our voice agent.
+                </p>
+                <div className="flex flex-col sm:flex-row gap-4">
+                    <Button size="lg" onClick={() => setAppState('context')}>
+                        <Speech className="mr-2" /> Text-based Entry
+                    </Button>
+                    <Button size="lg" variant="secondary" onClick={handleStartVoiceOnboarding} disabled={!hasBrowserSupport}>
+                        <Mic className="mr-2" /> Talk to Voice Agent
+                    </Button>
+                </div>
+                 {!hasBrowserSupport && <p className="text-destructive text-sm mt-4">Voice input is not supported on your browser. Please use text entry.</p>}
+            </div>
         );
       case 'context':
         return (
@@ -482,7 +571,7 @@ export function IvyVoiceGuide() {
                 <form
                   onSubmit={(e) => {
                     e.preventDefault();
-                    handleStartConversation();
+                    handleStartTextConversation();
                   }}
                   className="space-y-4"
                 >
@@ -519,6 +608,20 @@ export function IvyVoiceGuide() {
                         setStudentProfile({
                           ...studentProfile,
                           curriculum: e.target.value,
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="stream">Stream</Label>
+                    <Input
+                      id="stream"
+                      placeholder="e.g., Science, Commerce, Arts"
+                      value={studentProfile.stream}
+                      onChange={(e) =>
+                        setStudentProfile({
+                          ...studentProfile,
+                          stream: e.target.value,
                         })
                       }
                     />
@@ -584,7 +687,7 @@ export function IvyVoiceGuide() {
       <main className="flex-1 flex flex-col p-4 md:p-8 overflow-y-auto">
         {renderContent()}
       </main>
-      {appState !== 'welcome' && (
+      {(appState === 'chat' || appState === 'evaluating' || appState === 'report') && (
         <aside className="w-[380px] border-l bg-card p-4 lg:p-6 hidden lg:block no-print">
           <IvyNotes studentProfile={studentProfile} insights={insights} />
         </aside>
