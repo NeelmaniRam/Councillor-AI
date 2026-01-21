@@ -401,7 +401,6 @@ export function IvyVoiceGuide() {
         return;
       }
       
-      console.error('Speech recognition error:', event.error);
       if (event.error === 'not-allowed') {
         toast({
           variant: 'destructive',
@@ -410,6 +409,7 @@ export function IvyVoiceGuide() {
         });
         setIsMicOn(false);
       } else {
+        console.error('Speech recognition error:', event.error);
         toast({
           variant: 'destructive',
           title: 'Voice Recognition Error',
