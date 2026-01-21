@@ -1,4 +1,3 @@
-
 'use client';
 
 import { useState, useCallback, useTransition, useRef, useEffect } from 'react';
@@ -299,6 +298,10 @@ export function IvyVoiceGuide() {
       }
       if (event.error === 'aborted') {
         console.log('Speech recognition aborted (e.g., mic off). This is normal.');
+        return;
+      }
+      if (event.error === 'no-speech') {
+        console.log('No speech detected. Recognition will restart if mic is on.');
         return;
       }
       
