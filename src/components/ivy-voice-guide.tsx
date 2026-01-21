@@ -388,17 +388,9 @@ export function IvyVoiceGuide() {
     };
   
     recognitionRef.current.onerror = (event: any) => {
-      if (event.error === 'network') {
-        console.log('Speech recognition network error. Service will restart.');
-        return;
-      }
-      if (event.error === 'aborted') {
-        console.log('Speech recognition aborted (e.g., mic off). This is normal.');
-        return;
-      }
-      if (event.error === 'no-speech') {
-        console.log('No speech detected. Recognition will restart if mic is on.');
-        return;
+      if (event.error === 'network' || event.error === 'no-speech' || event.error === 'aborted') {
+         console.log(`Speech recognition non-critical error: ${event.error}. Service will restart.`);
+         return;
       }
       
       if (event.error === 'not-allowed') {
@@ -468,14 +460,14 @@ export function IvyVoiceGuide() {
       });
       return;
     }
+    setOnboardingStep('done');
     setAppState('chat');
-    setIsMicOn(true);
-    recognitionRef.current?.start();
+    setIsMicOn(false); // Start with mic off for text entry
 
     startTransition(async () => {
       try {
         const input: AIDrivenConversationInput = { ...studentProfile, conversationHistory: [], insights };
-        console.log('Sending initial prompt to AI.');
+        console.log('Sending initial prompt to AI for text-based entry.');
         const result = await aiDrivenConversation(input);
         startTransition(() => {});
         
@@ -495,6 +487,7 @@ export function IvyVoiceGuide() {
   }, [studentProfile, insights, toast, handlePlayAudio]);
 
   const handleStartVoiceOnboarding = useCallback(async () => {
+    setOnboardingStep('name'); // Ensure we start voice onboarding from the 'name' step
     setAppState('chat');
     setIsMicOn(true);
     recognitionRef.current?.start();
